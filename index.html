@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Paint The Town Red</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0f0f0f;
+        color: #e6e6e6;
+        font-family:
+          system-ui,
+          Segoe UI,
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+      }
+      #gameContainer {
+        width: 100vw;
+        height: 100vh;
+        display: block;
+        position: relative;
+        background: #231f20;
+      }
+      #gameContainer canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #title {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 5;
+        font-size: 32px;
+        letter-spacing: 1px;
+        font-weight: 800;
+        color: #ffffff;
+        text-align: center;
+        text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+        pointer-events: none;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="gameContainer"></div>
+    <div id="title">Paint The Town Red</div>
+    <script>
+      const baseUrl = "https://cdn.jsdelivr.net/gh/reeyuki/pttrwebport@main/";
+      const splits = { "Build/WebGL-Release.data.unityweb": 6 };
+      let assetCache = {};
+      let chunkGroups = {};
+      for (let k in splits) chunkGroups[k] = new Array(splits[k]);
+      let allUrls = [];
+      for (let k in splits) {
+        let prefix = k.replace(".unityweb", "");
+        for (let i = 0; i < splits[k]; i++) {
+          let url = baseUrl + prefix + String(i).padStart(2, "0");
+          allUrls.push({ key: k, idx: i, url: url });
+        }
+      }
+      Promise.all(
+        allUrls.map((o) =>
+          fetch(o.url)
+            .then((r) => {
+              if (!r.ok)
+                throw new Error("fetch failed " + r.status + " " + o.url);
+              return r.arrayBuffer();
+            })
+            .then((buf) => {
+              chunkGroups[o.key][o.idx] = new Uint8Array(buf);
+            }),
+        ),
+      )
+        .then(() => {
+          for (let k in chunkGroups) {
+            let parts = chunkGroups[k];
+            let total = parts.reduce((a, b) => a + b.length, 0);
+            let out = new Uint8Array(total);
+            let off = 0;
+            for (let p of parts) {
+              out.set(p, off);
+              off += p.length;
+            }
+            assetCache[k] = out;
+            assetCache[k.split("/").pop()] = out;
+          }
+          let origFetch = window.fetch;
+          window.fetch = function (input, init) {
+            let url =
+              typeof input === "string"
+                ? input
+                : input && input.url
+                  ? input.url
+                  : "";
+            for (let k in assetCache) {
+              if (url.includes(k)) {
+                return Promise.resolve(
+                  new Response(assetCache[k].slice(), {
+                    status: 200,
+                    headers: { "Content-Type": "application/octet-stream" },
+                  }),
+                );
+              }
+            }
+            return origFetch.apply(this, arguments);
+          };
+          let origOpen = XMLHttpRequest.prototype.open;
+          let origSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.open = function (m, u) {
+            this._u = u;
+            return origOpen.apply(this, arguments);
+          };
+          XMLHttpRequest.prototype.send = function () {
+            let u = this._u || "";
+            let match = null;
+            for (let k in assetCache) if (u.includes(k)) match = k;
+            if (match) {
+              let data = assetCache[match];
+              let self = this;
+              setTimeout(() => {
+                Object.defineProperty(self, "status", {
+                  value: 200,
+                  writable: true,
+                });
+                Object.defineProperty(self, "statusText", {
+                  value: "OK",
+                  writable: true,
+                });
+                Object.defineProperty(self, "readyState", {
+                  value: 4,
+                  writable: true,
+                });
+                Object.defineProperty(self, "response", {
+                  get: function () {
+                    return data.slice().buffer;
+                  },
+                  configurable: true,
+                });
+                Object.defineProperty(self, "responseText", {
+                  value: "",
+                  writable: true,
+                });
+                Object.defineProperty(self, "responseURL", {
+                  value: u,
+                  writable: true,
+                });
+                if (self.onreadystatechange)
+                  self.onreadystatechange(new Event("readystatechange"));
+                if (self.onload)
+                  self.onload(
+                    new ProgressEvent("load", {
+                      lengthComputable: true,
+                      loaded: data.length,
+                      total: data.length,
+                    }),
+                  );
+                self.dispatchEvent(new Event("load"));
+                self.dispatchEvent(new Event("loadend"));
+                self.dispatchEvent(new Event("readystatechange"));
+                if (self.onloadend)
+                  self.onloadend(new ProgressEvent("loadend"));
+              }, 0);
+              return;
+            }
+            return origSend.apply(this, arguments);
+          };
+          let s = document.createElement("script");
+          s.src = baseUrl + "Build/UnityLoader.js";
+          s.onload = () => {
+            window.gameInstance = UnityLoader.instantiate(
+              "gameContainer",
+              baseUrl + "Build/WebGL-Release.json",
+              {},
+            );
+          };
+          document.body.appendChild(s);
+        })
+        .catch(() => {});
+    </script>
+  </body>
+</html>
